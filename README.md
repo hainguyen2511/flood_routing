@@ -72,7 +72,100 @@ flood_routing/
 
 ---
 
-## 4. Luồng Xử Lý (Workflow Pipeline)
+## 4. Danh Sách Tên & Công Dụng Của Các Hàm Quan Trọng (API Reference)
+
+Dưới đây là bảng tra cứu nhanh và chi tiết đặc tả từng hàm, lớp quan trọng cốt lõi trong gói `flood_routing`:
+
+### 4.1. Bảng tra cứu nhanh các hàm & lớp
+
+| Tên Hàm / Lớp | Tệp mã nguồn | Công dụng chính |
+| :--- | :--- | :--- |
+| [`compute_flood_spread()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py#L94-L174) | `flood_engine.py` | Chạy Multi-source Dijkstra + R-tree tiền tính toán vùng lan tỏa ngập trên toàn mạng lưới (chạy 1 lần duy nhất). |
+| [`flood_at_time()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py#L177-L223) | `flood_engine.py` | Tính độ sâu ngập $F(e, t)$ của mọi cạnh tại phút thứ $t$ với chi phí $O(1)$ mỗi cạnh, xử lý chồng lấn bằng $\max()$. |
+| [`blocked_edges_at_time()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py#L225-L252) | `flood_engine.py` | Lọc ra danh sách các cạnh bị chặn tại thời điểm $t$ tương ứng với khả năng lội nước của từng loại xe. |
+| [`apply_dynamic_flood()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py#L254-L284) | `flood_engine.py` | Tạo đồ thị an toàn dạng `nx.restricted_view` (zero-copy) đã loại bỏ đường ngập tại thời điểm $t$ để đưa vào tìm đường. |
+| [`SpreadEntry`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py#L16-L30) | `flood_engine.py` | Đối tượng lưu trữ nhẹ (`__slots__`) chứa kết quả suy giảm $\alpha_0$ của một nguồn ngập trên một cạnh đường. |
+| [`FloodSource`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_models.py#L88-L159) | `flood_models.py` | Lớp mô hình hóa điểm ngập động: quản lý tọa độ, độ sâu ban đầu $F_0$, bán kính $R$, quận/huyện và quy luật rút nước. |
+| [`snap_coord_to_edge_with_offset()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_models.py#L44-L79) | `flood_models.py` | Chiếu tọa độ điểm ngập vào cạnh gần nhất, tính chính xác khoảng cách offset tới 2 đầu nút $u_0, v_0$. |
+| [`snap_coord_to_edge()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_models.py#L81-L85) | `flood_models.py` | Phiên bản rút gọn của phép chiếu tọa độ, trả về khóa định danh `EdgeKey` của cạnh gần nhất. |
+| [`get_drain_rate_for_district()`](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_config.py#L80-L90) | `flood_config.py` | Tra cứu tốc độ rút nước $r(\text{area})$ theo tên quận/huyện (hỗ trợ tiếng Việt có dấu, không dấu, chữ hoa/thường). |
+
+---
+
+### 4.2. Chi tiết công dụng từng hàm & lớp
+
+#### A. Nhóm Động cơ Tính Toán Ngập Động ([flood_engine.py](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_engine.py))
+
+1. **`compute_flood_spread(G, sources, R=None, get_district_fn=default_get_district, weight="length", use_endpoint_offset=True) -> SpreadCache`**
+   - **Mục đích:** Là trái tim của cơ chế tối ưu hiệu năng. Hàm tính toán trước độ lan tỏa ngập từ tất cả các tâm ngập ra mạng lưới giao thông đường bộ xung quanh.
+   - **Nguyên lý hoạt động:**
+     - Sử dụng thuật toán **Multi-source Dijkstra** với điểm khởi phát là 2 nút đầu mút $u_0, v_0$ của cạnh ngập kèm khoảng cách offset thực tế dọc theo cạnh.
+     - Giới hạn phạm vi duyệt bằng bán kính ảnh hưởng $R = k \times \sqrt{F_0}$.
+     - Kết hợp lọc không gian sơ bộ thông qua chỉ mục R-tree (`idx.within(lat, lng, R)`) để loại trừ các cạnh nằm ngoài bán kính địa lý.
+     - Tính trước hệ số suy giảm tuyến tính $\alpha_0(e) = \max\left(0, 1 - \frac{\text{dist}(e)}{R}\right)$ và lưu vào bộ nhớ đệm `SpreadCache`.
+   - **Tần suất gọi:** **Chạy duy nhất 1 lần** khi thiết lập danh sách điểm ngập. Kết quả được tái sử dụng vĩnh viễn cho hàng ngàn lần tìm đường sau đó.
+
+2. **`flood_at_time(spread_cache, t, shrink_radius=False) -> dict[EdgeKey, float]`**
+   - **Mục đích:** Xác định độ sâu ngập thực tế $F(e, t)$ của từng đoạn đường tại mốc thời gian $t$ (phút kể từ lúc quan trắc).
+   - **Nguyên lý hoạt động:**
+     - Với mỗi cạnh trong `spread_cache`, cập nhật độ sâu ngập tại tâm $F_0(t) = \max(0, F_0 - r \times t)$.
+     - Nhân với hệ số suy giảm $\alpha_0(e)$ đã tính sẵn để đạt độ phức tạp $O(1)$ trên mỗi cạnh.
+     - Khi một cạnh chịu ảnh hưởng từ nhiều nguồn ngập đồng thời, hàm áp dụng phép toán $\max()$ giữa các nguồn, **không cộng dồn** (tuân thủ nguyên lý vật lý cân bằng thủy lực).
+   - **Đầu ra:** Dictionary ánh xạ `{edge_key: depth_cm}` với các cạnh có mực nước $> 0\text{ cm}$.
+
+3. **`blocked_edges_at_time(H, spread_cache, t, profile, shrink_radius=False) -> set[EdgeKey]`**
+   - **Mục đích:** Sàng lọc và trả về tập hợp tất cả các cạnh trên đồ thị phương tiện $H$ bị cấm lưu thông tại thời điểm $t$.
+   - **Nguyên lý hoạt động:**
+     - Lấy bản đồ ngập từ `flood_at_time(spread_cache, t)`.
+     - So sánh độ sâu $F(e, t)$ với ngưỡng lội nước của phương tiện được cung cấp qua `profile` (chấp nhận tên định danh chuỗi `"motorbike_ice"`, `"vf3"`, `"car_ice"`, đối tượng `VehicleProfile`, hoặc số thực `float` chỉ định mức ngập tối đa tính bằng cm).
+     - Khớp chính xác định dạng khóa cạnh của đồ thị $H$ (hỗ trợ cả `DiGraph` và `MultiDiGraph`).
+
+4. **`apply_dynamic_flood(H, spread_cache_or_sources, t, profile, shrink_radius=False, as_view=True) -> nx.Graph`**
+   - **Mục đích:** Trực tiếp tạo ra một đồ thị giao thông an toàn tại thời điểm $t$ để đưa vào các thuật toán tìm đường (A*, Dijkstra, v.v.).
+   - **Ưu điểm vượt trội:**
+     - Mặc định sử dụng cơ chế `nx.restricted_view(H, [], blocked_edges)`. Đây là một **View chỉ đọc (Zero-copy)**, không nhân bản (copy) đồ thị gốc quy mô lớn của Hà Nội, giúp tiết kiệm bộ nhớ RAM và thời gian thực thi chỉ mất **$\sim 0.38\text{ ms}$** cho mỗi lần gọi.
+     - Cho phép truyền trực tiếp danh sách `[FloodSource]` (hàm sẽ tự động gọi `compute_flood_spread` nếu chưa có cache sẵn).
+
+5. **`SpreadEntry` & `SpreadCache`**
+   - **`SpreadEntry`:** Lớp dữ liệu tối ưu hóa bộ nhớ thông qua `__slots__ = ("source", "dist_e", "base_r", "alpha_0")`, lưu trữ độ suy giảm của một nguồn ngập lên một cạnh cụ thể. Hỗ trợ tuple-unpacking (`for src, alpha in influences:`).
+   - **`SpreadCache`:** Bí danh kiểu `dict[EdgeKey, list[SpreadEntry]]` biểu diễn cấu trúc dữ liệu vùng ngập toàn mạng lưới.
+
+---
+
+#### B. Nhóm Mô Hình Hóa Nguồn Ngập & Chiếu Tọa Độ ([flood_models.py](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_models.py))
+
+6. **Lớp `FloodSource(lat, lng, f0, k=50.0, id="")`**
+   - **Mục đích:** Đối tượng hóa một điểm ngập thực địa với đầy đủ các thuộc tính không gian và biến thiên thời gian.
+   - **Các phương thức quan trọng:**
+     - **`bind_to_graph(G, get_district_fn=default_get_district)`:** Tự động chiếu tọa độ $(lat, lng)$ vào cạnh gần nhất $e_0 = (u_0, v_0)$ của đồ thị $G$, tính khoảng cách từ điểm ngập tới $u_0$ và $v_0$, đồng thời tra cứu tên quận/huyện và gán tốc độ rút nước $r(\text{area})$ chuẩn xác.
+     - **`f0_at_time(t) -> float`:** Tính độ sâu ngập tại tâm ở phút thứ $t$: $F_0(t) = \max(0, F_0 - r \times t)$.
+     - **`radius_at_time(t, override_r=None, shrink=False) -> float`:** Tính bán kính ngập tại phút thứ $t$. Khi bật `shrink=True`, bán kính co dần theo tỷ lệ căn bậc hai độ sâu nước còn lại.
+     - **`radius_at_depth(depth_cm) -> float`:** Tính bán kính lan tỏa $R = k \times \sqrt{F_0}$.
+
+7. **`snap_coord_to_edge_with_offset(G, lat, lng) -> tuple[EdgeKey, float, float]`**
+   - **Mục đích:** Chiếu một cặp tọa độ GPS bất kỳ vào cạnh đường bộ gần nhất trên đồ thị $G$ thông qua thuật toán chiếu không gian (`hanoi_graph.snap.snap_point`).
+   - **Giá trị trả về:** Tuple gồm 3 phần tử: `(edge_key, dist_to_u_meters, dist_to_v_meters)` đại diện cho khóa của cạnh gần nhất và khoảng cách chính xác từ điểm chiếu đến 2 đầu mút $u, v$ của cạnh đó.
+
+8. **`snap_coord_to_edge(G, lat, lng) -> EdgeKey`**
+   - **Mục đích:** Hàm tiện ích rút gọn, nhận tọa độ $(lat, lng)$ và trả về duy nhất khóa định danh `EdgeKey` của cạnh gần nhất trên đồ thị.
+
+---
+
+#### C. Nhóm Cấu Hình & Bảng Tốc Độ Tiêu Thoát Nước ([flood_config.py](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/flood_routing/flood_config.py))
+
+9. **`get_drain_rate_for_district(district_name: str | None) -> float`**
+   - **Mục đích:** Tra cứu tốc độ rút nước định mức $r$ (cm/phút) của khu vực hành chính.
+   - **Khả năng tương thích cao:** Sử dụng cơ chế chuẩn hóa slug (`slugify`), tự động nhận diện chính xác dù tên quận/huyện được truyền vào dưới dạng tiếng Việt có dấu (`"Hoàn Kiếm"`), không dấu (`"Hoan Kiem"`), dính liền (`"HoanKiem"`), hay chữ thường (`"hoan kiem"`). Nếu không tìm thấy, hàm tự động trả về giá trị mặc định `DEFAULT_DRAIN_RATE` ($0.50\text{ cm/phút}$).
+
+10. **Các hằng số cấu hình cốt lõi:**
+    - `DEFAULT_DRAIN_RATE = 0.50`: Tốc độ tiêu thoát nước ngầm định áp dụng khi không xác định được quận/huyện ($0.50\text{ cm/phút}$).
+    - `RADIUS_K = 50.0`: Hệ số tỷ lệ thực nghiệm giữa độ sâu tâm và bán kính lan tỏa mạng lưới.
+    - `DRAINAGE_RATES`: Từ điển tra cứu tốc độ rút nước của toàn bộ 30 quận, huyện và thị xã thuộc thành phố Hà Nội.
+    - `EdgeKey`: Kiểu chú thích biểu diễn cạnh cho cả đồ thị đơn `(u, v)` và đồ thị đa cạnh `(u, v, key)`.
+
+---
+
+## 5. Luồng Xử Lý (Workflow Pipeline)
 
 Quy trình phối hợp giữa các thành phần trong `flood_routing` được tổ chức như sau:
 
@@ -93,7 +186,7 @@ flowchart TD
 
 ---
 
-## 5. Hướng Dẫn Sử Dụng Nhanh (Quickstart)
+## 6. Hướng Dẫn Sử Dụng Nhanh (Quickstart)
 
 ```python
 import networkx as nx
@@ -134,7 +227,7 @@ H_bike_safe = apply_dynamic_flood(H_bike, spread_cache, t=20.0, profile=profile_
 
 ---
 
-## 6. Bảng Tốc Độ Rút Nước Định Mức (30 Đơn Vị Hành Chính Hà Nội)
+## 7. Bảng Tốc Độ Rút Nước Định Mức (30 Đơn Vị Hành Chính Hà Nội)
 
 Tốc độ rút nước $r(\text{area})$ được thiết lập dựa trên đặc tính hạ tầng thoát nước của từng khu vực:
 
@@ -148,13 +241,13 @@ Tốc độ rút nước $r(\text{area})$ được thiết lập dựa trên đ�
 
 ---
 
-## 7. Giải Thích Bộ Kiểm Thử Thực Tế: `tests/test_flood_new.py`
+## 8. Giải Thích Bộ Kiểm Thử Thực Tế: `tests/test_flood_new.py`
 
 Tệp kiểm thử [tests/test_flood_new.py](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/tests/test_flood_new.py) được xây dựng để kiểm chứng toàn diện chức năng, độ chính xác toán học và hiệu năng vận hành của gói `flood_routing` trên **đồ thị Hà Nội thật quy mô lớn** ($256.974$ nodes, $622.345$ edges).
 
 Tệp kiểm thử tập trung độc lập vào cơ chế mô phỏng ngập, không phụ thuộc vào 2 hàm tìm đường, bao gồm 5 bài test chuẩn hóa:
 
-### 7.1. Chi tiết 5 bài kiểm thử (Test Cases)
+### 8.1. Chi tiết 5 bài kiểm thử (Test Cases)
 
 #### 1. `test_1_landmarks_district_and_dynamic_radius`
 - **Mục tiêu:** Kiểm tra khả năng snap điểm ngập vào đúng cạnh đường phố $e_0$, tự động nhận dạng quận/huyện qua tọa độ địa lý, gán đúng tốc độ thoát nước $r(\text{area})$ và tính chính xác bán kính động $R = k \times \sqrt{F_0}$.
@@ -195,7 +288,7 @@ Tệp kiểm thử tập trung độc lập vào cơ chế mô phỏng ngập, k
 
 > **Ý nghĩa:** Thời gian kiểm tra ngập động chỉ mất từ **0.17 đến 0.38 mili-giây** mỗi lần gọi. Điều này đảm bảo thuật toán tìm đường (A\*, Dynamic Routing) có thể tái định tuyến (re-plan) liên tục trong thời gian thực mà không gây trễ hệ thống.
 
-### 7.2. Hướng dẫn chạy bộ kiểm thử
+### 8.2. Hướng dẫn chạy bộ kiểm thử
 
 Để chạy kiểm thử kèm bảng kết quả chi tiết hiển thị trực tiếp ra màn hình:
 
