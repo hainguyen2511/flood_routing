@@ -3,6 +3,8 @@
 
 Thư mục `flood_routing` là module chuyên trách mô phỏng, tính toán và định tuyến giao thông dưới ảnh hưởng của hiện tượng ngập lụt động theo không gian và thời gian thực trên mạng lưới giao thông đường bộ Hà Nội. Module được xây dựng để hoạt động tương thích hoàn toàn với nền tảng đồ thị [hanoi-graph](file:///c:/FTU_NAM2_HK1/Nhap%20Mon%20AI/Project/hanoi-graph%20-%20Clone%20Test%202/README.md).
 
+> **Requirements:** Đã cài đặt `hanoi-graph` trước đó.
+
 ---
 
 ## 1. Mục Đích Của Thư Mục
